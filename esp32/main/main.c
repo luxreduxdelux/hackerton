@@ -61,8 +61,8 @@ typedef struct Lane {
 } Lane;
 
 #define LANE_COUNT 3
-#define LANE_NEXT_ARROW_LOWER_TIME 20
-#define LANE_NEXT_ARROW_UPPER_TIME 10
+#define LANE_NEXT_ARROW_LOWER_TIME 10
+#define LANE_NEXT_ARROW_UPPER_TIME 5
 
 typedef struct Game {
     Lane     laneList[LANE_COUNT];
@@ -74,7 +74,7 @@ typedef struct Game {
 } Game;
 
 #define GAME_DEFAULT_LIFE  3
-#define GAME_DEFAULT_SPEED 3
+#define GAME_DEFAULT_SPEED 5
 
 static Game new_game() {
     Game game  = { 0 };
@@ -335,12 +335,12 @@ void app_main(void) {
             switch (app.state) {
                 case MAIN:
                     display_clear();
-                    //display_text(0,  0, "Hack Hack Revolution", false);
-                    //display_text(0,  8, "[B1] Jugar", false);
-                    display_draw_arrow(0, ARROW_SCALE * 0, arrowDE, arrowDF, bRead & (1u << BTN_KEY1));
-                    display_draw_arrow(0, ARROW_SCALE * 1, arrowLE, arrowLF, bRead & (1u << BTN_KEY2));
-                    display_draw_arrow(0, ARROW_SCALE * 2, arrowRE, arrowRF, bRead & (1u << BTN_KEY3));
-                    display_draw_number(0, ARROW_SCALE * 3, 1337);
+                    display_text(0,  0, "Hack Hack Revolution", false);
+                    display_text(0,  8, "[B1] Jugar", false);
+                    //display_draw_arrow(0, ARROW_SCALE * 0, arrowDE, arrowDF, bRead & (1u << BTN_KEY1));
+                    //display_draw_arrow(0, ARROW_SCALE * 1, arrowLE, arrowLF, bRead & (1u << BTN_KEY2));
+                    //display_draw_arrow(0, ARROW_SCALE * 2, arrowRE, arrowRF, bRead & (1u << BTN_KEY3));
+                    //display_draw_number(0, ARROW_SCALE * 3, 1337);
                     display_flush();
 
                     if (buttons_read() & (1u << BTN_KEY1)) {
@@ -376,14 +376,9 @@ void app_main(void) {
                     display_clear();
                     display_draw_number( 0, 0, app.game.score);
                     display_draw_number(96, 0, app.game.life);
-                    //display_text(0, 0, "Score:", false); display_text(DISPLAY_FONT_W * 7, 0, (char*) &score, false);
-                    //display_text(0, 8, "Life:",  false); display_text(DISPLAY_FONT_W * 6, 8, (char*) &life, false);
                     display_draw_arrow(0, ARROW_SCALE * 1, arrowDE, arrowDF, bRead & (1u << BTN_KEY1));
                     display_draw_arrow(0, ARROW_SCALE * 2, arrowLE, arrowLF, bRead & (1u << BTN_KEY2));
                     display_draw_arrow(0, ARROW_SCALE * 3, arrowRE, arrowRF, bRead & (1u << BTN_KEY3));
-                    //display_draw_rect_fill(0, ARROW_SCALE * 1, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY1));
-                    //display_draw_rect_fill(0, ARROW_SCALE * 2, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY2));
-                    //display_draw_rect_fill(0, ARROW_SCALE * 3, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY3));
 
                     if (app.game.arrowNext == 0) {
                         insert_lane_arrow(&app.game.laneList[rand() % LANE_COUNT]);
