@@ -1,17 +1,23 @@
+// stdlib
 #include <stdio.h>
 
+// freeRTOS/ESP32
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 
+// local
 #include "audio.h"
 #include "buttons.h"
 #include "display.h"
 
-static const char *TAG = "demo";
+//================================================================
 
 #define UI_PERIOD_MS 50
+#define SCREEN_SIZE_X 128
+#define SCREEN_SIZE_Y 64
 
+static const char *TAG = "demo";
 static const int s_button_freq[BTN_COUNT] = {
     [BTN_UP]     = 659,
     [BTN_DOWN]   = 440,
@@ -23,6 +29,102 @@ static const int s_button_freq[BTN_COUNT] = {
     [BTN_KEY3]   = 392,
     [BTN_KEY4]   = 523,
 };
+
+//================================================================
+
+typedef enum {
+    MAIN,
+    LOBBY,
+    GAME,
+    VICTORY,
+    FAILURE,
+} State;
+
+typedef struct Arrow {
+    int16_t position;
+} Arrow;
+
+#define ARROW_COUNT 32
+#define ARROW_SCALE 16
+
+typedef struct Lane {
+    Arrow   arrowList[ARROW_COUNT];
+    uint8_t arrowCount;
+} Lane;
+
+#define LANE_COUNT 3
+#define LANE_NEXT_ARROW_LOWER_TIME 20
+#define LANE_NEXT_ARROW_UPPER_TIME 10
+
+typedef struct Game {
+    Lane     laneList[LANE_COUNT];
+    uint8_t  life;
+    uint8_t  speed;
+    uint16_t score;
+    uint8_t  arrowNext;
+} Game;
+
+#define GAME_DEFAULT_LIFE  3
+#define GAME_DEFAULT_SPEED 3
+
+static Game new_game() {
+    Game game  = { 0 };
+    game.life  = GAME_DEFAULT_LIFE;
+    game.speed = GAME_DEFAULT_SPEED;
+    game.arrowNext = (rand() % LANE_NEXT_ARROW_UPPER_TIME) + LANE_NEXT_ARROW_LOWER_TIME;
+
+    return game;
+}
+
+typedef struct App {
+    State state;
+    Game  game;
+} App;
+
+static void shift_lane_by_one(Lane* lane) {
+    if (lane->arrowCount > 0) {
+        for (uint8_t i = 0; i < lane->arrowCount; i++) {
+            lane->arrowList[i] = lane->arrowList[i + 1];
+        }
+
+        lane->arrowCount -= 1;
+    }
+}
+
+static void insert_lane_arrow(Lane* lane) {
+    if (lane->arrowCount < ARROW_COUNT) {
+        lane->arrowList[lane->arrowCount] = (Arrow) {
+            .position = SCREEN_SIZE_X
+        };
+        lane->arrowCount += 1;
+    }
+}
+
+static void handle_lane_arrow(App *app, Lane* lane) {
+    if (lane->arrowCount > 0) {
+        Arrow* arrow = &lane->arrowList[0];
+
+        if (arrow->position >= -ARROW_SCALE && arrow->position <= ARROW_SCALE) {
+            shift_lane_by_one(lane);
+            app->game.score += 1;
+            return;
+        }
+    }
+
+    if (app->game.life > 0) {
+        app->game.life -= 1;
+    }
+}
+
+//================================================================
+
+static void display_draw_rect_fill(uint8_t x, uint8_t y, uint8_t w, uint8_t h, bool fill) {
+    if (fill) {
+        display_fill_rect(x, y, w, h, true);
+    } else {
+        display_draw_rect(x, y, w, h);
+    }
+}
 
 static void draw_key(int x, int y, int size, bool pressed)
 {
@@ -52,7 +154,7 @@ static void draw_ui(uint32_t pressed, int mic_level, bool audio_ok)
     }
 
     draw_key(15, 28, 10, pressed & (1u << BTN_UP));
-    draw_key(4, 39, 10, pressed & (1u << BTN_LEFT));
+    draw_key(4,  39, 10, pressed & (1u << BTN_LEFT));
     draw_key(15, 39, 10, pressed & (1u << BTN_CENTER));
     draw_key(26, 39, 10, pressed & (1u << BTN_RIGHT));
     draw_key(15, 50, 10, pressed & (1u << BTN_DOWN));
@@ -67,27 +169,34 @@ static void draw_ui(uint32_t pressed, int mic_level, bool audio_ok)
     }
 }
 
-typedef enum {
-    MAIN,
-    GAME,
-    FAIL,
-} State;
+void integer_to_string(int N, char *str) {
+    int i = 0;
 
-typedef struct App {
-    State state;
-    int16_t playerPosition;
-    int16_t playerScore;
-    int16_t obstaclePosition;
-    int16_t obstacleHoleSize;
-    int16_t obstacleHolePosition;
-} App;
+    int sign = N;
 
-#define SCREEN_SIZE_X 128
-#define SCREEN_SIZE_Y 64
+    if (N < 0)
+        N = -N;
 
-void app_main(void)
-{
-    App app = { 0 };
+    while (N > 0) {
+        str[i++] = N % 10 + '0';
+        N /= 10;
+    }
+
+    if (sign < 0) {
+        str[i++] = '-';
+    }
+
+    //str[i] = '\0';
+
+    for (int j = 0, k = i - 1; j < k; j++, k--) {
+        char temp = str[j];
+        str[j] = str[k];
+        str[k] = temp;
+    }
+}
+
+void app_main(void) {
+    App app   = { 0 };
 
     ESP_LOGI(TAG, "Hackathon board demo starting");
 
@@ -123,66 +232,109 @@ void app_main(void)
     while (1) {
         button_event_t ev;
         if (xQueueReceive(events, &ev, pdMS_TO_TICKS(UI_PERIOD_MS)) == pdTRUE) {
+            uint32_t bRead = buttons_read();
             ESP_LOGI(TAG, "button %s %s", buttons_name(ev.id), ev.pressed ? "pressed" : "released");
+
+            if (bRead & (1u << BTN_KEY1)) { handle_lane_arrow(&app, &app.game.laneList[0]); }
+            if (bRead & (1u << BTN_KEY2)) { handle_lane_arrow(&app, &app.game.laneList[1]); }
+            if (bRead & (1u << BTN_KEY3)) { handle_lane_arrow(&app, &app.game.laneList[2]); }
+
             if (ev.pressed && audio_ok) {
                 audio_play_tone(s_button_freq[ev.id], 100);
             }
         }
 
-        // sizeX = 128
-        // sizeY = 64
-        int mic_level = audio_ok ? audio_mic_level() : 0;
+        uint32_t bRead = buttons_read();
+
+        //int mic_level = audio_ok ? audio_mic_level() : 0;
         if (display_ok) {
             switch (app.state) {
                 case MAIN:
                     display_clear();
-                    display_text(8,  8, "Hacky Bird", false);
-                    display_text(8, 24, "[A] Comenzar", false);
+                    display_text(0,  0, "Hack Hack Revolution", false);
+                    display_text(0,  8, "[B1] Client", false);
+                    display_text(0, 16, "[B2] Server", false);
                     display_flush();
 
+                    // client
                     if (buttons_read() & (1u << BTN_KEY1)) {
                         app.state = GAME;
+                        app.game  = new_game();
                     }
+
+                    // server
+                    if (buttons_read() & (1u << BTN_KEY2)) {
+                    }
+                    break;
+                case LOBBY:
                     break;
                 case GAME:
-                    if (mic_level >= 50) {
-                        app.playerPosition -= mic_level - 50;
+                    if (app.game.life <= 0) {
+                        app.state = FAILURE;
+                        continue;
                     }
 
-                    app.playerPosition   += 1;
-                    app.obstaclePosition -= 2;
-
-                    if (app.obstaclePosition < -16)  {
-                        app.obstaclePosition     = SCREEN_SIZE_X + 16;
-                        app.obstacleHoleSize     = 16;
-                        app.obstacleHolePosition = 32;
-                    }
-
-                    if (app.playerPosition < 0) {
-                        app.playerPosition = 0;
-                    }
-                    if (app.playerPosition > 48) {
-                        app.state = FAIL;
-                    }
+                    char life[4]  = {0};
+                    char score[4] = {0};
+                    integer_to_string(app.game.score, (char*) &score);
+                    integer_to_string(app.game.life, (char*) &life);
 
                     display_clear();
-                    display_draw_rect(56, app.playerPosition, 16, 16);
-                    display_draw_rect(app.obstaclePosition, 0,                         16, SCREEN_SIZE_Y - app.obstacleHoleSize);
-                    display_draw_rect(app.obstaclePosition, SCREEN_SIZE_Y - app.obstacleHoleSize, 16, app.obstacleHoleSize);
+                    display_text(0, 0, "Score:", false); display_text(DISPLAY_FONT_W * 7, 0, (char*) &score, false);
+                    display_text(0, 8, "Life:",  false); display_text(DISPLAY_FONT_W * 6, 8, (char*) &life, false);
+                    display_draw_rect_fill(0, ARROW_SCALE * 1, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY1));
+                    display_draw_rect_fill(0, ARROW_SCALE * 2, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY2));
+                    display_draw_rect_fill(0, ARROW_SCALE * 3, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY3));
+
+                    if (app.game.arrowNext == 0) {
+                        insert_lane_arrow(&app.game.laneList[rand() % LANE_COUNT]);
+                        app.game.arrowNext = (rand() % LANE_NEXT_ARROW_UPPER_TIME) + LANE_NEXT_ARROW_LOWER_TIME;
+                    } else {
+                        app.game.arrowNext -= 1;
+                    }
+
+                    for (uint8_t i = 0; i < LANE_COUNT; i++) {
+                        Lane* lane = &app.game.laneList[i];
+
+                        for (uint8_t a = 0; a < lane->arrowCount; a++) {
+                            Arrow* arrow = &lane->arrowList[a];
+                            arrow->position -= app.game.speed;
+
+                            display_draw_rect(arrow->position, ARROW_SCALE * (i + 1), ARROW_SCALE, ARROW_SCALE);
+
+                            if (arrow->position < -ARROW_SCALE) {
+                                shift_lane_by_one(lane);
+                                if (app.game.life > 0) {
+                                    app.game.life -= 1;
+                                }
+                            }
+                        }
+
+                    }
+                    display_flush();
+
+                    //if (buttons_read() & (1u << BTN_KEY1)) { handle_lane_arrow(0); }
+                    //if (buttons_read() & (1u << BTN_KEY2)) { handle_lane_arrow(1); }
+                    //if (buttons_read() & (1u << BTN_KEY3)) { handle_lane_arrow(2); }
+
+                    break;
+                case VICTORY:
+                    display_clear();
+                    display_text(0,  0, "Ya-Hoo!!!!!!!!!!!!!!", false);
+                    display_text(0,  8, "Puntaje:", false); display_text(DISPLAY_FONT_W * 9, 16, "1337", false);
+                    display_text(0, 16, "[B1] Comenzar", false);
                     display_flush();
                     break;
-                case FAIL:
+                case FAILURE:
                     display_clear();
-                    display_text(8,  8, "Game Over", false);
-                    display_text(8, 24, "Puntaje: ", false);
-                    // TO-DO pasar app.playerScore a string
-                    display_text(8 + DISPLAY_FONT_W * 9, 24, "TO-DO", false);
-                    display_text(8, 48, "[A] Comenzar", false);
+                    display_text(0,  0, "#owned",   false);
+                    display_text(0,  8, "Puntaje:", false); display_text(DISPLAY_FONT_W * 9, 16, "1337", false);
+                    display_text(0, 16, "[B1] Comenzar", false);
                     display_flush();
 
                     if (buttons_read() & (1u << BTN_KEY1)) {
-                        app = (App) { 0 };
                         app.state = GAME;
+                        app.game  = new_game();
                     }
                     break;
             }
