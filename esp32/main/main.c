@@ -41,6 +41,11 @@ typedef enum {
     FAILURE,
 } State;
 
+typedef struct Packet {
+    uint16_t score;
+    uint8_t  life;
+} Packet;
+
 typedef struct Arrow {
     int16_t position;
 } Arrow;
@@ -63,6 +68,7 @@ typedef struct Game {
     uint8_t  speed;
     uint16_t score;
     uint8_t  arrowNext;
+    Packet   opponent;
 } Game;
 
 #define GAME_DEFAULT_LIFE  3
@@ -78,8 +84,9 @@ static Game new_game() {
 }
 
 typedef struct App {
-    State state;
-    Game  game;
+    State    state;
+    Game     game;
+    uint8_t  address[6];
 } App;
 
 static void shift_lane_by_one(Lane* lane) {
@@ -196,15 +203,50 @@ void integer_to_string(int N, char *str) {
     }
 }
 
-void game_rx_callback(const uint8_t *data,
-                      size_t len,
-                      const uint8_t *src_mac){
+App app = {0};
+
+void game_rx_callback(const uint8_t *data, size_t len, const uint8_t *src_mac) {
+    switch (app.state) {
+        case LOBBY:
+            if (len == 4) {
+                if (data[0] != 'H') { return; }
+                if (data[1] != 'A') { return; }
+                if (data[2] != 'C') { return; }
+                if (data[3] != 'K') { return; }
+
+                const uint8_t buffer[] = {'O', 'K'};
+                comm_send((const uint8_t*) &buffer, sizeof(buffer));
+                app.state   = GAME;
+                app.game    = new_game();
+                memcpy(&app.address, src_mac, sizeof(app.address));
+                printf("lobby hand-shake HACK\n");
+            }
+
+            if (len == 2) {
+                if (data[0] != 'O') { return; }
+                if (data[1] != 'K') { return; }
+
+                app.state   = GAME;
+                app.game    = new_game();
+                memcpy(&app.address, src_mac, sizeof(app.address));
+                printf("lobby hand-shake OK\n");
+            }
+            break;
+        case GAME:
+            if (strncmp((const char*) src_mac, (const char*) &app.address, 6) == 0 && len == sizeof(Packet)) {
+                memcpy(&app.game.opponent, data, sizeof(Packet));
+                printf("game packet\n");
+            }
+            break;
+        default:
+            break;
+    }
+
+    // TO-DO logica para pasar de LOBBY a GAME
     printf("Mensaje recibido: %zu bytes\n", len);
 }
 
 void app_main(void) {
-    App app   = { 0 };
-
     ESP_LOGI(TAG, "Hackathon board demo starting");
 
     bool display_ok = display_init() == ESP_OK;
@@ -222,7 +264,7 @@ void app_main(void) {
 
     if (display_ok) {
         display_clear();
-        display_text(10, 8, "Hello, Hackathon!", false);
+        display_text(10,  8, "Hello, Hackathon!", false);
         display_text(10, 24, "ESP32-S3 dev board", false);
         display_text(10, 40, "Self test...", false);
         display_flush();
@@ -241,6 +283,7 @@ void app_main(void) {
 
     QueueHandle_t events = buttons_event_queue();
     int log_div = 0;
+    int broadcast_time_out = 0;
 
     while (1) {
         button_event_t ev;
@@ -265,21 +308,26 @@ void app_main(void) {
                 case MAIN:
                     display_clear();
                     display_text(0,  0, "Hack Hack Revolution", false);
-                    display_text(0,  8, "[B1] Client", false);
-                    display_text(0, 16, "[B2] Server", false);
+                    display_text(0,  8, "[B1] Jugar", false);
                     display_flush();
 
-                    // client
                     if (buttons_read() & (1u << BTN_KEY1)) {
-                        app.state = GAME;
-                        app.game  = new_game();
-                    }
-
-                    // server
-                    if (buttons_read() & (1u << BTN_KEY2)) {
+                        app.state = LOBBY;
                     }
                     break;
                 case LOBBY:
+                    display_clear();
+                    display_text(0,  0, "Esperando conexion...", false);
+                    display_flush();
+
+                    if (broadcast_time_out <= 0) {
+                        const uint8_t buffer[] = {'H', 'A', 'C', 'K'};
+                        comm_send((const uint8_t*) &buffer, sizeof(buffer));
+                        broadcast_time_out = 25;
+                        printf("Enviando packet broad-cast...\n");
+                    }
+
+                    broadcast_time_out -= 1;
                     break;
                 case GAME:
                     if (app.game.life <= 0) {
