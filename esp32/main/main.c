@@ -290,14 +290,6 @@ void app_main(void) {
 
     ESP_ERROR_CHECK(buttons_init());
 
-    if (display_ok) {
-        display_clear();
-        display_text(10,  8, "Hello, Hackathon!", false);
-        display_text(10, 24, "ESP32-S3 dev board", false);
-        display_text(10, 40, "Self test...", false);
-        display_flush();
-    }
-
     bool audio_ok = audio_init() == ESP_OK;
     if (audio_ok) {
         const int notes[] = {523, 659, 784};
@@ -310,7 +302,6 @@ void app_main(void) {
     vTaskDelay(pdMS_TO_TICKS(500));
 
     QueueHandle_t events = buttons_event_queue();
-    int log_div = 0;
     int broadcast_time_out = 0;
 
     while (1) {
@@ -330,17 +321,12 @@ void app_main(void) {
 
         uint32_t bRead = buttons_read();
 
-        //int mic_level = audio_ok ? audio_mic_level() : 0;
         if (display_ok) {
             switch (app.state) {
                 case MAIN:
                     display_clear();
                     display_text(0,  0, "Hack Hack Revolution", false);
                     display_text(0,  8, "[B1] Jugar", false);
-                    //display_draw_arrow(0, ARROW_SCALE * 0, arrowDE, arrowDF, bRead & (1u << BTN_KEY1));
-                    //display_draw_arrow(0, ARROW_SCALE * 1, arrowLE, arrowLF, bRead & (1u << BTN_KEY2));
-                    //display_draw_arrow(0, ARROW_SCALE * 2, arrowRE, arrowRF, bRead & (1u << BTN_KEY3));
-                    //display_draw_number(0, ARROW_SCALE * 3, 1337);
                     display_flush();
 
                     if (buttons_read() & (1u << BTN_KEY1)) {
@@ -397,57 +383,38 @@ void app_main(void) {
                             if (i == 0) display_draw_arrow(arrow->position, ARROW_SCALE * (i + 1), arrowDE, arrowDE, false);
                             if (i == 1) display_draw_arrow(arrow->position, ARROW_SCALE * (i + 1), arrowLE, arrowLE, false);
                             if (i == 2) display_draw_arrow(arrow->position, ARROW_SCALE * (i + 1), arrowRE, arrowRE, false);
-                            //display_draw_rect(arrow->position, ARROW_SCALE * (i + 1), ARROW_SCALE, ARROW_SCALE);
 
                             if (arrow->position < -ARROW_SCALE) {
                                 shift_lane_by_one(lane);
                                 if (app.game.life > 0) {
                                     app.game.life -= 1;
                                     Game* game = &app.game;
-                                    //update_adversary_packet(game);
                                 }
                             }
                         }
 
                     }
                     display_flush();
-
-                    //if (buttons_read() & (1u << BTN_KEY1)) { handle_lane_arrow(0); }
-                    //if (buttons_read() & (1u << BTN_KEY2)) { handle_lane_arrow(1); }
-                    //if (buttons_read() & (1u << BTN_KEY3)) { handle_lane_arrow(2); }
-
                     break;
                 case VICTORY:
                     display_clear();
                     display_text(0,  0, "Ya-Hoo!!!!!!!!!!!!!!", false);
-                    display_text(0,  8, "Puntaje:", false); display_text(DISPLAY_FONT_W * 9, 16, "1337", false);
-                    display_text(0, 16, "[B1] Comenzar", false);
+                    display_text(0,  8, "Puntaje:", false);
+                    display_draw_number(0, 16, app.game.score);
+                    display_text(0, 32, "Pulsa [RESET].", false);
                     display_flush();
                     break;
                 case FAILURE:
                     display_clear();
                     display_text(0,  0, "#owned",   false);
-                    display_text(0,  8, "Puntaje:", false); display_text(DISPLAY_FONT_W * 9, 16, "1337", false);
-                    display_text(0, 16, "[B1] Comenzar", false);
+                    display_text(0,  8, "Puntaje:", false);
+                    display_draw_number(0, 16, app.game.score);
+                    display_text(0, 32, "Pulsa [RESET].", false);
                     display_flush();
-
-                    //if (buttons_read() & (1u << BTN_KEY1)) {
-                    //    app.state = GAME;
-                    //    app.game  = new_game();
-                    //}
                     break;
             }
 
             buttons_read();
-            //draw_ui(buttons_read(), mic_level, audio_ok);
-            //display_flush();
         }
-
-        /*
-        if (audio_ok && ++log_div >= 1000 / UI_PERIOD_MS) {
-            log_div = 0;
-            ESP_LOGI(TAG, "mic level: %d", mic_level);
-        }
-        */
     }
 }
