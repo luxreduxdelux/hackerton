@@ -126,6 +126,14 @@ static void handle_lane_arrow(App *app, Lane* lane) {
 
 //================================================================
 
+static void display_draw_arrow(uint8_t x, uint8_t y, unsigned char* spriteE, unsigned char* spriteF, bool fill) {
+    if (fill) {
+        display_draw_sprite(x, y, spriteF);
+    } else {
+        display_draw_sprite(x, y, spriteE);
+    }
+}
+
 static void display_draw_rect_fill(uint8_t x, uint8_t y, uint8_t w, uint8_t h, bool fill) {
     if (fill) {
         display_fill_rect(x, y, w, h, true);
@@ -307,8 +315,12 @@ void app_main(void) {
             switch (app.state) {
                 case MAIN:
                     display_clear();
-                    display_text(0,  0, "Hack Hack Revolution", false);
-                    display_text(0,  8, "[B1] Jugar", false);
+                    //display_text(0,  0, "Hack Hack Revolution", false);
+                    //display_text(0,  8, "[B1] Jugar", false);
+                    display_draw_arrow(0, ARROW_SCALE * 0, arrowDE, arrowDF, bRead & (1u << BTN_KEY1));
+                    display_draw_arrow(0, ARROW_SCALE * 1, arrowLE, arrowLF, bRead & (1u << BTN_KEY2));
+                    display_draw_arrow(0, ARROW_SCALE * 2, arrowRE, arrowRF, bRead & (1u << BTN_KEY3));
+                    display_draw_number(0, ARROW_SCALE * 3, 1337);
                     display_flush();
 
                     if (buttons_read() & (1u << BTN_KEY1)) {
@@ -341,11 +353,16 @@ void app_main(void) {
                     integer_to_string(app.game.life, (char*) &life);
 
                     display_clear();
-                    display_text(0, 0, "Score:", false); display_text(DISPLAY_FONT_W * 7, 0, (char*) &score, false);
-                    display_text(0, 8, "Life:",  false); display_text(DISPLAY_FONT_W * 6, 8, (char*) &life, false);
-                    display_draw_rect_fill(0, ARROW_SCALE * 1, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY1));
-                    display_draw_rect_fill(0, ARROW_SCALE * 2, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY2));
-                    display_draw_rect_fill(0, ARROW_SCALE * 3, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY3));
+                    display_draw_number( 0, 0, app.game.score);
+                    display_draw_number(96, 0, app.game.life);
+                    //display_text(0, 0, "Score:", false); display_text(DISPLAY_FONT_W * 7, 0, (char*) &score, false);
+                    //display_text(0, 8, "Life:",  false); display_text(DISPLAY_FONT_W * 6, 8, (char*) &life, false);
+                    display_draw_arrow(0, ARROW_SCALE * 1, arrowDE, arrowDF, bRead & (1u << BTN_KEY1));
+                    display_draw_arrow(0, ARROW_SCALE * 2, arrowLE, arrowLF, bRead & (1u << BTN_KEY2));
+                    display_draw_arrow(0, ARROW_SCALE * 3, arrowRE, arrowRF, bRead & (1u << BTN_KEY3));
+                    //display_draw_rect_fill(0, ARROW_SCALE * 1, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY1));
+                    //display_draw_rect_fill(0, ARROW_SCALE * 2, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY2));
+                    //display_draw_rect_fill(0, ARROW_SCALE * 3, ARROW_SCALE, ARROW_SCALE, bRead & (1u << BTN_KEY3));
 
                     if (app.game.arrowNext == 0) {
                         insert_lane_arrow(&app.game.laneList[rand() % LANE_COUNT]);
@@ -361,7 +378,10 @@ void app_main(void) {
                             Arrow* arrow = &lane->arrowList[a];
                             arrow->position -= app.game.speed;
 
-                            display_draw_rect(arrow->position, ARROW_SCALE * (i + 1), ARROW_SCALE, ARROW_SCALE);
+                            if (i == 0) display_draw_arrow(arrow->position, ARROW_SCALE * (i + 1), arrowDE, arrowDE, false);
+                            if (i == 1) display_draw_arrow(arrow->position, ARROW_SCALE * (i + 1), arrowLE, arrowLE, false);
+                            if (i == 2) display_draw_arrow(arrow->position, ARROW_SCALE * (i + 1), arrowRE, arrowRE, false);
+                            //display_draw_rect(arrow->position, ARROW_SCALE * (i + 1), ARROW_SCALE, ARROW_SCALE);
 
                             if (arrow->position < -ARROW_SCALE) {
                                 shift_lane_by_one(lane);
