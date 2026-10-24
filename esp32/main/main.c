@@ -1,6 +1,6 @@
 // stdlib
 #include <stdio.h>
-
+#include <unistd.h>
 // freeRTOS/ESP32
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -11,6 +11,7 @@
 #include "buttons.h"
 #include "display.h"
 #include "network.h"
+
 
 //================================================================
 
@@ -107,6 +108,15 @@ static void insert_lane_arrow(Lane* lane) {
         };
         lane->arrowCount += 1;
     }
+}
+
+static void update_adversary_packet(Game* game) {
+    Packet packet = {0};
+    memcpy(&packet.mac, &game->opponent.mac, sizeof(uint8_t) * 6);
+    packet.score  = game->score;
+    packet.life   = game->life;
+    ESP_LOGI(TAG, "sending packet to other player: score=%d, life=%d", packet.score, packet.life);
+    comm_send((const uint8_t*) &packet, sizeof(Packet));
 }
 
 static void handle_lane_arrow(App *app, Lane* lane) {
@@ -242,6 +252,17 @@ void game_rx_callback(const uint8_t *data, size_t len, const uint8_t *src_mac) {
             }else{
                 Packet* packet = (Packet*) data;
                 memcpy(&app.game.opponent, packet, sizeof(Packet));
+                ESP_LOGI(TAG, "game packet from other player: score=%d, life=%d", packet->score, packet->life);
+                if (app.game.opponent.life <= 3) {
+                    app.state = VICTORY;
+                    display_clear();
+                    display_text(0,  0, "Ya-Hoo!!!!!!!!!!!!!!", false);
+                    display_text(0,  8, "Puntaje:", false); display_text(DISPLAY_FONT_W * 9, 16, "1337", false);
+                    display_text(0, 16, "[B1] Comenzar", false);
+                    
+                    display_flush();
+                    sleep(1);
+                }
             }
             break;
         default:
@@ -249,17 +270,9 @@ void game_rx_callback(const uint8_t *data, size_t len, const uint8_t *src_mac) {
     }
 
     // TO-DO logica para pasar de LOBBY a GAME
-    printf("Mensaje recibido: %zu bytes\n", len);
 }
 
-static void update_adversary_packet(Game* game) {
-    Packet packet = {0};
-    memcpy(&packet.mac, &game->opponent.mac, sizeof(uint8_t) * 6);
-    packet.score  = game->score;
-    packet.life   = game->life;
 
-    comm_send((const uint8_t*) &packet, sizeof(Packet));
-}
 
 void app_main(void) {
     ESP_LOGI(TAG, "Hackathon board demo starting");
@@ -382,7 +395,7 @@ void app_main(void) {
                                 shift_lane_by_one(lane);
                                 if (app.game.life > 0) {
                                     app.game.life -= 1;
-                                    Game* game = &app->game;
+                                    Game* game = &app.game;
                                     update_adversary_packet(game);
                                 }
                             }
