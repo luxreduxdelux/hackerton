@@ -249,19 +249,11 @@ void game_rx_callback(const uint8_t *data, size_t len, const uint8_t *src_mac) {
             if (strncmp((const char*) src_mac, (const char*) &app.address, 6) == 0 && len == sizeof(Packet)) {
                 memcpy(&app.game.opponent, data, sizeof(Packet));
                 printf("game packet\n");
-            }else{
                 Packet* packet = (Packet*) data;
                 memcpy(&app.game.opponent, packet, sizeof(Packet));
                 ESP_LOGI(TAG, "game packet from other player: score=%d, life=%d", packet->score, packet->life);
                 if (app.game.opponent.life <= 3) {
                     app.state = VICTORY;
-                    display_clear();
-                    display_text(0,  0, "Ya-Hoo!!!!!!!!!!!!!!", false);
-                    display_text(0,  8, "Puntaje:", false); display_text(DISPLAY_FONT_W * 9, 16, "1337", false);
-                    display_text(0, 16, "[B1] Comenzar", false);
-                    
-                    display_flush();
-                    sleep(1);
                 }
             }
             break;

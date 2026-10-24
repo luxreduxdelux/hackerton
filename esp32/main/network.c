@@ -25,7 +25,7 @@ static void on_data_recv(const uint8_t *mac_addr, const uint8_t *data, int len) 
     const uint8_t *src_mac = mac_addr;
 #endif
     if (data && len > 0) {
-        ESP_LOGI(TAG, "Mensaje recibido: %d bytes", len);
+        //ESP_LOGI(TAG, "Mensaje recibido: %d bytes", len);
         if (s_rx_callback) {
             s_rx_callback(data, (size_t)len, src_mac);
         }
