@@ -42,6 +42,7 @@ typedef enum {
 } State;
 
 typedef struct Packet {
+    uint8_t  mac[6];
     uint16_t score;
     uint8_t  life;
 } Packet;
@@ -121,6 +122,8 @@ static void handle_lane_arrow(App *app, Lane* lane) {
 
     if (app->game.life > 0) {
         app->game.life -= 1;
+        Game* game = &app->game;
+        update_adversary_packet(game);
     }
 }
 
@@ -236,6 +239,9 @@ void game_rx_callback(const uint8_t *data, size_t len, const uint8_t *src_mac) {
             if (strncmp((const char*) src_mac, (const char*) &app.address, 6) == 0 && len == sizeof(Packet)) {
                 memcpy(&app.game.opponent, data, sizeof(Packet));
                 printf("game packet\n");
+            }else{
+                Packet* packet = (Packet*) data;
+                memcpy(&app.game.opponent, packet, sizeof(Packet));
             }
             break;
         default:
@@ -244,6 +250,15 @@ void game_rx_callback(const uint8_t *data, size_t len, const uint8_t *src_mac) {
 
     // TO-DO logica para pasar de LOBBY a GAME
     printf("Mensaje recibido: %zu bytes\n", len);
+}
+
+static void update_adversary_packet(Game* game) {
+    Packet packet = {0};
+    memcpy(&packet.mac, &game->opponent.mac, sizeof(uint8_t) * 6);
+    packet.score  = game->score;
+    packet.life   = game->life;
+
+    comm_send((const uint8_t*) &packet, sizeof(Packet));
 }
 
 void app_main(void) {
@@ -367,6 +382,8 @@ void app_main(void) {
                                 shift_lane_by_one(lane);
                                 if (app.game.life > 0) {
                                     app.game.life -= 1;
+                                    Game* game = &app->game;
+                                    update_adversary_packet(game);
                                 }
                             }
                         }
