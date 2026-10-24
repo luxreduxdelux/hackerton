@@ -10,6 +10,7 @@
 #include "audio.h"
 #include "buttons.h"
 #include "display.h"
+#include "network.h"
 
 //================================================================
 
@@ -195,6 +196,12 @@ void integer_to_string(int N, char *str) {
     }
 }
 
+void game_rx_callback(const uint8_t *data,
+                      size_t len,
+                      const uint8_t *src_mac){
+    printf("Mensaje recibido: %zu bytes\n", len);
+}
+
 void app_main(void) {
     App app   = { 0 };
 
@@ -203,6 +210,12 @@ void app_main(void) {
     bool display_ok = display_init() == ESP_OK;
     if (!display_ok) {
         ESP_LOGE(TAG, "display init failed - continuing without screen");
+    }
+    comm_rx_callback_t rx_cb = game_rx_callback;
+    bool comm_ok = comm_init(rx_cb) == true;
+
+    if (!comm_ok) {
+        ESP_LOGE(TAG, "comm init failed - continuing without network");
     }
 
     ESP_ERROR_CHECK(buttons_init());
