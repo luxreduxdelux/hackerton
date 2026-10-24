@@ -133,7 +133,7 @@ static void handle_lane_arrow(App *app, Lane* lane) {
     if (app->game.life > 0) {
         app->game.life -= 1;
         Game* game = &app->game;
-        update_adversary_packet(game);
+        //update_adversary_packet(game);
     }
 }
 
@@ -352,6 +352,7 @@ void app_main(void) {
                 case GAME:
                     if (app.game.life <= 0) {
                         app.state = FAILURE;
+                        update_adversary_packet(&app.game);
                         continue;
                     }
 
@@ -388,7 +389,7 @@ void app_main(void) {
                                 if (app.game.life > 0) {
                                     app.game.life -= 1;
                                     Game* game = &app.game;
-                                    update_adversary_packet(game);
+                                    //update_adversary_packet(game);
                                 }
                             }
                         }
@@ -415,10 +416,10 @@ void app_main(void) {
                     display_text(0, 16, "[B1] Comenzar", false);
                     display_flush();
 
-                    if (buttons_read() & (1u << BTN_KEY1)) {
-                        app.state = GAME;
-                        app.game  = new_game();
-                    }
+                    //if (buttons_read() & (1u << BTN_KEY1)) {
+                    //    app.state = GAME;
+                    //    app.game  = new_game();
+                    //}
                     break;
             }
 
