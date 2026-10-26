@@ -1,4 +1,3 @@
-#include "network.h"
 #include "esp_wifi.h"
 #include "esp_now.h"
 #include "esp_log.h"
@@ -9,12 +8,21 @@
 #include "esp_idf_version.h"
 #include <string.h>
 
-static const char *TAG = "ESP_NOW_COMM";
+//================================================================
+
+#include "network.h"
+
+//================================================================
+
+static const char *TAG = "network";
+
+//================================================================
 
 // dir broadcasta para enviar a la otra placa
 static const uint8_t s_broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+static network_rx_callback_t s_rx_callback = NULL;
 
-static comm_rx_callback_t s_rx_callback = NULL;
+//================================================================
 
 // callback interno invocado del driver de ESP-NOW al recibir datos
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
@@ -47,10 +55,10 @@ static void on_data_sent(const uint8_t *mac_addr,
     }
 }
 
-bool comm_init(comm_rx_callback_t rx_cb) {
+bool network_initialize(network_rx_callback_t rx_cb) {
     s_rx_callback = rx_cb;
 
-    // 1 inicializo el almacenamiento NVS Flash
+    // 1 - inicializo el almacenamiento NVS Flash
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -104,7 +112,7 @@ bool comm_init(comm_rx_callback_t rx_cb) {
     return true;
 }
 
-bool comm_send(const uint8_t *data, size_t len) {
+bool network_send(const uint8_t *data, size_t len) {
     if (!data || len == 0 || len > 250) {
         ESP_LOGE(TAG, "Datos nulos o tamaño inválido (max 250B)");
         return false;
@@ -119,7 +127,7 @@ bool comm_send(const uint8_t *data, size_t len) {
     return true;
 }
 
-void comm_get_my_mac(uint8_t mac_out[6]) {
+void network_get_my_mac(uint8_t mac_out[6]) {
     if (mac_out) {
         esp_read_mac(mac_out, ESP_MAC_WIFI_STA);
     }

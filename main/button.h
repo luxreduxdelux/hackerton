@@ -1,11 +1,14 @@
 #pragma once
 
+//================================================================
+
 #include <stdbool.h>
 #include <stdint.h>
-
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+
+//================================================================
 
 typedef enum {
     BTN_UP,
@@ -25,10 +28,8 @@ typedef struct {
     bool pressed;
 } button_event_t;
 
-esp_err_t buttons_init(void);
+//================================================================
 
-QueueHandle_t buttons_event_queue(void);
-
-uint32_t buttons_read(void);
-
-const char *buttons_name(button_id_t id);
+esp_err_t button_initialize(void);
+QueueHandle_t button_event_queue(void);
+uint32_t button_read(void);
