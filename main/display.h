@@ -24,10 +24,12 @@ typedef struct Sprite {
 extern Sprite arrowDE;
 extern Sprite arrowLE;
 extern Sprite arrowRE;
+extern Sprite arrowUF;
 extern Sprite arrowDF;
 extern Sprite arrowLF;
 extern Sprite arrowRF;
-extern Sprite heartF;
+extern Sprite combo;
+extern Sprite heart;
 extern Sprite number[10];
 extern Sprite comCom;
 extern Sprite victory;

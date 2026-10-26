@@ -22,10 +22,18 @@ App app = {0};
 
 static Game new_game() {
     Game game  = { 0 };
-    game.life  = GAME_DEFAULT_LIFE;
+    game.life  = GAME_LIMIT_LIFE;
     game.arrowNext = (rand() % LANE_NEXT_ARROW_UPPER_TIME) + LANE_NEXT_ARROW_LOWER_TIME;
 
     return game;
+}
+
+static void take_damage(Game* game) {
+    if (game->life > 0) {
+        game->life -= 1;
+        game->combo = 0;
+        game->shake = 5;
+    }
 }
 
 static void shift_lane_by_one(Lane* lane) {
@@ -50,9 +58,8 @@ static void insert_lane_arrow(Lane* lane) {
 static void update_adversary_packet(Game* game) {
     Packet packet = {0};
     memcpy(&packet.mac, &game->opponent.mac, sizeof(uint8_t) * 6);
-    packet.score  = game->score;
-    packet.life   = game->life;
-    ESP_LOGI(TAG, "sending packet to other player: score=%d, life=%d", packet.score, packet.life);
+    packet.life = game->life;
+    ESP_LOGI(TAG, "sending packet to other player: life=%d", packet.life);
     network_send((const uint8_t*) &packet, sizeof(Packet));
 }
 
@@ -63,15 +70,15 @@ static void handle_lane_arrow(App *app, Lane* lane) {
         if (arrow->position >= -ARROW_SCALE && arrow->position <= ARROW_SCALE) {
             shift_lane_by_one(lane);
 
-            if (app->game.score < 10000 - 1) {
-                app->game.score += 1 * ((app->game.combo / 10) + 1);
+            if (app->game.score < GAME_LIMIT_SCORE) {
+                app->game.score += 1 * ((app->game.combo / GAME_ADD_COMBO) + 1);
             }
 
-            if (app->game.combo < 100 - 1) {
+            if (app->game.combo < GAME_LIMIT_COMBO) {
                 app->game.combo += 1;
 
-                if (app->game.combo % 20 == 0) {
-                    if (app->game.life < 3) {
+                if (app->game.combo % GAME_ADD_LIFE == 0) {
+                    if (app->game.life < GAME_LIMIT_LIFE) {
                         app->game.life += 1;
                     }
                 }
@@ -80,10 +87,7 @@ static void handle_lane_arrow(App *app, Lane* lane) {
         }
     }
 
-    if (app->game.life > 0) {
-        app->game.life -= 1;
-        app->game.combo = 0;
-    }
+    take_damage(&app->game);
 }
 
 static void display_draw_arrow(uint8_t x, uint8_t y, const Sprite* spriteE, const Sprite* spriteF, bool fill) {
@@ -108,7 +112,6 @@ static void game_rx_callback(const uint8_t *data, size_t len, const uint8_t *src
                 app.state   = GAME;
                 app.game    = new_game();
                 memcpy(&app.address, src_mac, sizeof(app.address));
-                printf("lobby hand-shake HACK\n");
             }
 
             if (len == 2) {
@@ -118,16 +121,14 @@ static void game_rx_callback(const uint8_t *data, size_t len, const uint8_t *src
                 app.state   = GAME;
                 app.game    = new_game();
                 memcpy(&app.address, src_mac, sizeof(app.address));
-                printf("lobby hand-shake OK\n");
             }
             break;
         case GAME:
             if (strncmp((const char*) src_mac, (const char*) &app.address, 6) == 0 && len == sizeof(Packet)) {
                 memcpy(&app.game.opponent, data, sizeof(Packet));
-                printf("game packet\n");
                 Packet* packet = (Packet*) data;
                 memcpy(&app.game.opponent, packet, sizeof(Packet));
-                ESP_LOGI(TAG, "game packet from other player: score=%d, life=%d", packet->score, packet->life);
+
                 if (app.game.opponent.life <= 3) {
                     app.state = VICTORY;
                 }
@@ -138,6 +139,22 @@ static void game_rx_callback(const uint8_t *data, size_t len, const uint8_t *src
     }
 }
 
+static int8_t can_enter_score(App* app) {
+    for (uint8_t i = 0; i < SCORE_ENTRY_COUNT; i++) {
+        if (app->game.score > app->scoreList[i].score) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+static void shift_score_by_one(App* app, uint8_t index) {
+    for (uint8_t i = SCORE_ENTRY_COUNT - 1; i > index; i--) {
+        app->scoreList[i] = app->scoreList[i - 1];
+    }
+}
+
 //================================================================
 
 void app_main(void) {
@@ -145,52 +162,61 @@ void app_main(void) {
     network_initialize(game_rx_callback);
     button_initialize();
 
-    QueueHandle_t events = button_event_queue();
-    int broadcast_time_out = 0;
+    QueueHandle_t event_queue = button_event_queue();
 
     //================================
 
     while (true) {
-        button_event_t ev;
-        if (xQueueReceive(events, &ev, pdMS_TO_TICKS(UI_PERIOD_MS)) == pdTRUE) {
-            uint32_t bRead = button_read();
-
-            if (app.state == GAME) {
-                if (bRead & (1u << BTN_KEY1)) { handle_lane_arrow(&app, &app.game.laneList[0]); }
-                if (bRead & (1u << BTN_KEY2)) { handle_lane_arrow(&app, &app.game.laneList[1]); }
-                if (bRead & (1u << BTN_KEY3)) { handle_lane_arrow(&app, &app.game.laneList[2]); }
-            }
-        }
-
-        uint32_t bRead = button_read();
+        button_event_t event = {0};
+        xQueueReceive(event_queue, &event, pdMS_TO_TICKS(UI_PERIOD_MS));
+        uint32_t button_state = button_read();
 
         switch (app.state) {
             case MAIN:
                 display_clear();
                 display_draw_sprite((BOARD_LCD_W - comCom.size_x) / 2, 0, &comCom);
-                display_text((BOARD_LCD_W / 2) - (5 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 2), "[B1] Jugar", false);
-                display_text((BOARD_LCD_W / 2) - (5 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 1), "[B2] Ayuda", false);
+                display_text((BOARD_LCD_W / 2) - (5 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 2), "[B4] Jugar", false);
+                display_text((BOARD_LCD_W / 2) - (5 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 1), "[B1] Ayuda", false);
                 display_flush();
 
-                if (bRead & (1u << BTN_KEY1)) {
+                if (event.id == BTN_KEY4 && event.pressed == false) {
                     app.state   = GAME;
                     app.game    = new_game();
                     //app.state = LOBBY;
                 }
-                if (bRead & (1u << BTN_KEY2)) {
-                    app.state = HELP;
+                if (event.id == BTN_KEY1 && event.pressed == false) {
+                    app.state = HELP_1;
                 }
+
+                rand();
                 break;
-            case HELP:
+            case HELP_1:
                 display_clear();
-                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), DISPLAY_FONT_H * 0, "@santuchoagus",  false);
-                display_text((BOARD_LCD_W / 2) - (8 * DISPLAY_FONT_W), DISPLAY_FONT_H * 1, "@EzequielTrigo", false);
-                display_text((BOARD_LCD_W / 2) - (4 * DISPLAY_FONT_W), DISPLAY_FONT_H * 2, "@blatth",        false);
-                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), DISPLAY_FONT_H * 3, "@luxreduxdelux", false);
-                display_text((BOARD_LCD_W / 2) - (5 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 1), "[B1] Volver", false);
+                display_text((BOARD_LCD_W / 2) - (9  * DISPLAY_FONT_W), DISPLAY_FONT_H * 0, "[B1] Flecha Abajo",    false);
+                display_text((BOARD_LCD_W / 2) - (8  * DISPLAY_FONT_W), DISPLAY_FONT_H * 1, "[B2] Flecha Izq.",     false);
+                display_text((BOARD_LCD_W / 2) - (8  * DISPLAY_FONT_W), DISPLAY_FONT_H * 2, "[B3] Flecha Der.",     false);
+                display_text((BOARD_LCD_W / 2) - (10 * DISPLAY_FONT_W), DISPLAY_FONT_H * 3, "10 flechas seguidas:", false);
+                display_text((BOARD_LCD_W / 2) - (8  * DISPLAY_FONT_W), DISPLAY_FONT_H * 4, "subis el combo.",      false);
+                display_text((BOARD_LCD_W / 2) - (10 * DISPLAY_FONT_W), DISPLAY_FONT_H * 5, "20 flechas seguidas:", false);
+                display_text((BOARD_LCD_W / 2) - (7  * DISPLAY_FONT_W), DISPLAY_FONT_H * 6, "subis la vida.",       false);
+                display_text((BOARD_LCD_W / 2) - (7  * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 1), "[B1] Siguiente", false);
                 display_flush();
 
-                if (bRead & (1u << BTN_KEY1)) {
+                if (event.id == BTN_KEY1 && event.pressed == false) {
+                    app.state = HELP_2;
+                }
+                break;
+            case HELP_2:
+                display_clear();
+                display_text((BOARD_LCD_W / 2) - (9 * DISPLAY_FONT_W), DISPLAY_FONT_H * 0, "CC Revolution por",  false);
+                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), DISPLAY_FONT_H * 1, "@santuchoagus",      false);
+                display_text((BOARD_LCD_W / 2) - (8 * DISPLAY_FONT_W), DISPLAY_FONT_H * 2, "@EzequielTrigo",     false);
+                display_text((BOARD_LCD_W / 2) - (4 * DISPLAY_FONT_W), DISPLAY_FONT_H * 3, "@blatth",            false);
+                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), DISPLAY_FONT_H * 4, "@luxreduxdelux",     false);
+                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 1), "[B1] Siguiente", false);
+                display_flush();
+
+                if (event.id == BTN_KEY1 && event.pressed == false) {
                     app.state = MAIN;
                 }
                 break;
@@ -200,13 +226,13 @@ void app_main(void) {
                 display_text((BOARD_LCD_W / 2) - (10 * DISPLAY_FONT_W), BOARD_LCD_H - DISPLAY_FONT_H, "Esperando conexion...", false);
                 display_flush();
 
-                if (broadcast_time_out <= 0) {
+                if (app.broadcast_retry_time <= 0) {
                     const uint8_t buffer[] = {'H', 'A', 'C', 'K'};
                     network_send((const uint8_t*) &buffer, sizeof(buffer));
-                    broadcast_time_out = 25;
+                    app.broadcast_retry_time = 25;
                 }
 
-                broadcast_time_out -= 1;
+                app.broadcast_retry_time -= 1;
                 break;
             case GAME:
                 if (app.game.life <= 0) {
@@ -215,16 +241,22 @@ void app_main(void) {
                     continue;
                 }
 
-                display_clear();
-                display_draw_number( 0, 0, app.game.score);
-                display_draw_sprite( 64, 0, &heartF);
-                display_draw_number( 80, 0, app.game.life);
-                display_draw_sprite( 96, 0, &heartF);
-                display_draw_number(112, 0, app.game.combo / 10);
+                int8_t shake_x = app.game.shake > 0 ? (rand() % (app.game.shake + app.game.shake + 1)) - app.game.shake : 0;
+                int8_t shake_y = app.game.shake > 0 ? (rand() % (app.game.shake + app.game.shake + 1)) - app.game.shake : 0;
 
-                display_draw_arrow(0, ARROW_SCALE * 1, &arrowDE, &arrowDF, bRead & (1u << BTN_KEY1));
-                display_draw_arrow(0, ARROW_SCALE * 2, &arrowLE, &arrowLF, bRead & (1u << BTN_KEY2));
-                display_draw_arrow(0, ARROW_SCALE * 3, &arrowRE, &arrowRF, bRead & (1u << BTN_KEY3));
+                display_clear();
+                display_draw_number(shake_x + 0,   shake_y, app.game.score);
+
+                if (app.game.combo >= GAME_ADD_COMBO) {
+                    display_draw_sprite(shake_x + 64, shake_y, &combo);
+                    display_draw_number(shake_x + 80, shake_y, (app.game.combo / GAME_ADD_COMBO) + 1);
+                }
+
+                display_draw_sprite(shake_x + 96,  shake_y, &heart);
+                display_draw_number(shake_x + 112, shake_y, app.game.life);
+                display_draw_arrow(shake_x, shake_y + (ARROW_SCALE * 1), &arrowDE, &arrowDF, button_state & (1u << BTN_KEY1));
+                display_draw_arrow(shake_x, shake_y + (ARROW_SCALE * 2), &arrowLE, &arrowLF, button_state & (1u << BTN_KEY2));
+                display_draw_arrow(shake_x, shake_y + (ARROW_SCALE * 3), &arrowRE, &arrowRF, button_state & (1u << BTN_KEY3));
 
                 if (app.game.arrowNext == 0) {
                     insert_lane_arrow(&app.game.laneList[rand() % LANE_COUNT]);
@@ -233,43 +265,136 @@ void app_main(void) {
                     app.game.arrowNext -= 1;
                 }
 
+                if (app.game.shake > 0) {
+                    app.game.shake -= 1;
+                }
+
+                if (event.id == BTN_KEY1 && event.pressed) { handle_lane_arrow(&app, &app.game.laneList[0]); }
+                if (event.id == BTN_KEY2 && event.pressed) { handle_lane_arrow(&app, &app.game.laneList[1]); }
+                if (event.id == BTN_KEY3 && event.pressed) { handle_lane_arrow(&app, &app.game.laneList[2]); }
+
                 for (uint8_t i = 0; i < LANE_COUNT; i++) {
                     Lane* lane = &app.game.laneList[i];
 
                     for (uint8_t a = 0; a < lane->arrowCount; a++) {
                         Arrow* arrow = &lane->arrowList[a];
-                        arrow->position -= GAME_DEFAULT_SPEED + (app.game.combo / 10);
+                        arrow->position -= GAME_SPEED + (app.game.combo / GAME_ADD_COMBO);
 
-                        if (i == 0) display_draw_arrow(arrow->position, ARROW_SCALE * 1, &arrowDE, &arrowDE, false);
-                        if (i == 1) display_draw_arrow(arrow->position, ARROW_SCALE * 2, &arrowLE, &arrowLE, false);
-                        if (i == 2) display_draw_arrow(arrow->position, ARROW_SCALE * 3, &arrowRE, &arrowRE, false);
+                        if (i == 0) display_draw_arrow(shake_x + arrow->position, shake_y + ARROW_SCALE * 1, &arrowDE, &arrowDE, false);
+                        if (i == 1) display_draw_arrow(shake_x + arrow->position, shake_y + ARROW_SCALE * 2, &arrowLE, &arrowLE, false);
+                        if (i == 2) display_draw_arrow(shake_x + arrow->position, shake_y + ARROW_SCALE * 3, &arrowRE, &arrowRE, false);
 
                         if (arrow->position < -ARROW_SCALE) {
                             shift_lane_by_one(lane);
-
-                            if (app.game.life > 0) {
-                                app.game.life -= 1;
-                                app.game.combo = 0;
-                            }
+                            take_damage(&app.game);
                         }
                     }
                 }
                 display_flush();
                 break;
             case VICTORY:
+                char score_text[13];
+                char score_size = snprintf((char*) &score_text, sizeof(score_text), "Puntaje: %d", app.game.score) / 2;
+
                 display_clear();
                 display_draw_sprite((BOARD_LCD_W - victory.size_x) / 2, 0, &victory);
-                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 2), "Puntaje: .....", false);
-                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 1), "Pulsa [RESET].", false);
+                display_text((BOARD_LCD_W / 2) - (score_size * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 2), score_text, false);
+                display_text((BOARD_LCD_W / 2) - (5 * DISPLAY_FONT_W),          BOARD_LCD_H - (DISPLAY_FONT_H * 1), "[B4] Menu", false);
                 display_flush();
+
+                if (event.id == BTN_KEY4 && event.pressed == false) {
+                    int8_t canEnter = can_enter_score(&app);
+
+                    if (canEnter >= 0) {
+                        app.state = SCORE_ENTER;
+                        shift_score_by_one(&app, canEnter);
+                        app.scoreList[canEnter] = (ScoreEntry) {0};
+                        app.scoreCharacter = 65;
+                        app.scoreIndex     = 0;
+                    } else {
+                        app.state = SCORE_BOARD;
+                    }
+                }
                 break;
             case FAILURE:
-                //display_draw_number(0, 16, app.game.score);
+                score_size = snprintf((char*) &score_text, sizeof(score_text), "Puntaje: %d", app.game.score) / 2;
+
                 display_clear();
                 display_draw_sprite((BOARD_LCD_W - failure.size_x) / 2, 0, &failure);
-                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 2), "Puntaje: ....", false);
-                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 1), "Pulsa [RESET].", false);
+                display_text((BOARD_LCD_W / 2) - (score_size * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 2), score_text, false);
+                display_text((BOARD_LCD_W / 2) - (5 * DISPLAY_FONT_W),          BOARD_LCD_H - (DISPLAY_FONT_H * 1), "[B4] Menu", false);
                 display_flush();
+
+                if (event.id == BTN_KEY4 && event.pressed == false) {
+                    int8_t canEnter = can_enter_score(&app);
+
+                    if (canEnter >= 0) {
+                        app.state = SCORE_ENTER;
+                        shift_score_by_one(&app, canEnter);
+                        app.scoreList[canEnter] = (ScoreEntry) {0};
+                        app.scoreCharacter = 65;
+                        app.scoreIndex     = 0;
+                    } else {
+                        app.state = SCORE_BOARD;
+                    }
+                }
+                break;
+            case SCORE_ENTER:
+                char score_name[9];
+                ScoreEntry* entry = &app.scoreList[can_enter_score(&app)];
+
+                if (app.scoreIndex == 0) snprintf((char*) &score_name, sizeof(score_name), "[%c]%c%c", app.scoreCharacter, entry->name[1], entry->name[2]);
+                if (app.scoreIndex == 1) snprintf((char*) &score_name, sizeof(score_name), "%c[%c]%c", entry->name[0], app.scoreCharacter, entry->name[2]);
+                if (app.scoreIndex == 2) snprintf((char*) &score_name, sizeof(score_name), "%c%c[%c]", entry->name[0], entry->name[1], app.scoreCharacter);
+
+                display_clear();
+                display_text((BOARD_LCD_W / 2) - (9  * DISPLAY_FONT_W), (DISPLAY_FONT_H * 0), "Ingresa tu nombre:",                  false);
+                display_text((BOARD_LCD_W / 2) - (5  * DISPLAY_FONT_W), (DISPLAY_FONT_H * 1), score_name,                            false);
+                display_text((BOARD_LCD_W / 2) - (10 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 2), "[B1/B2] Cambiar Letra", false);
+                display_text((BOARD_LCD_W / 2) - (7  * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 1), "[B4] Siguiente",        false);
+                display_flush();
+
+                if (event.id == BTN_KEY1 && event.pressed == false) {
+                    app.scoreCharacter -= 1;
+                    if (app.scoreCharacter < 65) app.scoreCharacter = 90;
+                }
+
+                if (event.id == BTN_KEY2 && event.pressed == false) {
+                    app.scoreCharacter += 1;
+                    if (app.scoreCharacter > 90) app.scoreCharacter = 65;
+                }
+
+                if (event.id == BTN_KEY4 && event.pressed == false) {
+                    entry->name[app.scoreIndex] = app.scoreCharacter;
+                    app.scoreCharacter = 65;
+                    app.scoreIndex    += 1;
+
+                    if (app.scoreIndex > 2) {
+                        app.state = SCORE_BOARD;
+                        entry->score = app.game.score;
+                    }
+                }
+                break;
+            case SCORE_BOARD:
+                char score_entry[11];
+                display_clear();
+                display_text((BOARD_LCD_W / 2) - (9 * DISPLAY_FONT_W), 0, "Ultra-ComComistas", false);
+
+                for (uint8_t i = 0; i < SCORE_ENTRY_COUNT; i++) {
+                    if (app.scoreList[i].name[0] == 0) {
+                        display_text((BOARD_LCD_W / 2) - (5 * DISPLAY_FONT_W), DISPLAY_FONT_H * (i + 1), "< vacio >", false);
+                    } else {
+                        score_size = snprintf((char*) &score_entry, sizeof(score_entry), "%s - %d", app.scoreList[i].name, app.scoreList[i].score) / 2;
+                        display_text((BOARD_LCD_W / 2) - (score_size * DISPLAY_FONT_W), DISPLAY_FONT_H * (i + 1), score_entry, false);
+                    }
+                }
+
+                display_text((BOARD_LCD_W / 2) - (7 * DISPLAY_FONT_W), BOARD_LCD_H - (DISPLAY_FONT_H * 1), "[B4] Siguiente", false);
+                display_flush();
+
+                if (event.id == BTN_KEY4 && event.pressed == false) {
+                    app.state = MAIN;
+                }
                 break;
         }
     }
